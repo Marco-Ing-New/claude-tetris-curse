@@ -1,0 +1,121 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+concurrency:
+  group: triage-issue-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    if: github.event.sender.type != 'Bot'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # necesario para aplicar labels y comentar
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ensure domain labels exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create "area:gameplay" -c "#5319e7" -d "Lógica de juego: piezas, rotación, colisión, wall kicks" || true
+          gh label create "area:rendering" -c "#5319e7" -d "Dibujo en canvas, ghost piece, tema visual" || true
+          gh label create "area:controls" -c "#5319e7" -d "Teclado, pausa, hard/soft drop" || true
+          gh label create "area:scoring" -c "#5319e7" -d "Puntuación, líneas, niveles, velocidad" || true
+          gh label create "area:ui" -c "#5319e7" -d "DOM, panel lateral, overlays, copy en español" || true
+          gh label create "area:performance" -c "#5319e7" -d "Game loop, timing, requestAnimationFrame" || true
+          gh label create "P0-critico" -c "#b60205" -d "Juego roto o injugable" || true
+          gh label create "P1-alto" -c "#d93f0b" -d "Bug relevante o feature prioritaria" || true
+          gh label create "P2-normal" -c "#fbca04" -d "Mejora o bug menor" || true
+          gh label create "needs-info" -c "#c5def5" -d "Falta información para diagnosticar" || true
+
+      - name: Run Claude Code triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh label list:*),Bash(gh api:*),Read,Grep,Glob"'
+          prompt: |
+            Vas a triar el issue #${{ github.event.issue.number }} del repositorio ${{ github.repository }}.
+
+            ## Contexto del proyecto
+            Es un Tetris clásico en JavaScript vanilla con Canvas, sin dependencias ni build
+            (`index.html`, `style.css`, `game.js`). Toda la lógica vive en `game.js` (~300 líneas,
+            sin módulos ni clases): modelo de tablero, piezas y rotación (`rotateCW`, transpose +
+            reverse), colisión (`collide`), wall kicks (`tryRotate`, offsets [0,-1,1,-2,2]), loop de
+            juego (`loop`, `requestAnimationFrame`), lockPiece/spawn, clearLines, scoring
+            (`LINE_SCORES`), nivel/velocidad (`dropInterval`) y ghost piece (`ghostY`). No hay
+            suite de tests; todo se verifica abriendo `index.html` en el navegador. La UI (labels,
+            overlays, botones) está en español. Si se cambian `COLS`/`ROWS`/`BLOCK`, hay que
+            actualizar el `width`/`height` del `<canvas id="board">` en `index.html`.
+
+            ## Pasos
+
+            1. Lee el issue con `gh issue view ${{ github.event.issue.number }} --json title,body,labels,author,comments`.
+            2. Lee `game.js` (y `index.html`/`style.css` si aplica) para identificar qué funciones
+               concretas están implicadas en lo que describe el issue.
+            3. Lista los labels disponibles con `gh label list` y aplica:
+               - Exactamente un tipo: `bug`, `enhancement`, `documentation` o `question`.
+               - Una o más áreas: `area:gameplay`, `area:rendering`, `area:controls`,
+                 `area:scoring`, `area:ui`, `area:performance`.
+               - Una prioridad: `P0-critico`, `P1-alto` o `P2-normal`.
+               - Si el issue no da información suficiente para diagnosticar, añade también
+                 `needs-info` (y dilo explícitamente en el diagnóstico).
+               No quites labels que ya haya puesto una persona. Aplica los labels nuevos con
+               `gh issue edit ${{ github.event.issue.number }} --add-label "label1,label2,..."`.
+            4. Publica el diagnóstico como comentario **sticky** (uno solo por issue, que se
+               actualiza en cada ejecución en lugar de acumularse):
+               - Busca si ya existe un comentario propio:
+                 `gh api repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments --jq '.[] | select(.body | contains("<!-- claude-triage -->")) | .id'`
+               - Si existe un id, actualízalo con
+                 `gh api -X PATCH repos/${{ github.repository }}/issues/comments/<id> -f body=@<archivo>`.
+               - Si no existe, créalo con
+                 `gh api -X POST repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments -f body=@<archivo>`.
+               - El cuerpo del comentario debe empezar SIEMPRE con la línea literal
+                 `<!-- claude-triage -->` y seguir exactamente esta plantilla en español (rellena
+                 los `<...>`, no dejes placeholders sin completar, y usa "Ninguna" si no hay
+                 preguntas abiertas):
+
+                 ```
+                 <!-- claude-triage -->
+                 ## 🔍 Diagnóstico automático
+
+                 **Clasificación:** <tipo> · <área(s)> · <prioridad>
+
+                 ### Resumen
+                 <2-3 frases sobre qué se pide o qué falla>
+
+                 ### Reproducción / comportamiento esperado
+                 <pasos si es bug; comportamiento deseado si es feature>
+
+                 ### Análisis técnico
+                 <hipótesis de causa raíz, con referencias concretas a game.js y sus funciones>
+
+                 ### Archivos y funciones a tocar
+                 - `game.js` → `<funcion()>` — <qué cambiar>
+
+                 ### Criterios de aceptación
+                 - [ ] <verificable abriendo el juego en el navegador>
+
+                 ### Riesgos y efectos colaterales
+                 <por ejemplo, ajustes de canvas si cambian COLS/ROWS/BLOCK, o "Ninguno evidente">
+
+                 ### Preguntas abiertas
+                 <o "Ninguna">
+
+                 ---
+                 *Generado automáticamente. Actualizado: <fecha actual en formato AAAA-MM-DD>*
+                 ```
+
+            No hagas commits ni abras pull requests. Tu única salida es: labels aplicados al issue
+            y el comentario de diagnóstico.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
