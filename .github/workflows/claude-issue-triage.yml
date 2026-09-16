@@ -79,7 +79,11 @@ jobs:
                  `gh api -X PATCH repos/${{ github.repository }}/issues/comments/<id> -f body=@<archivo>`.
                - Si no existe, créalo con
                  `gh api -X POST repos/${{ github.repository }}/issues/${{ github.event.issue.number }}/comments -f body=@<archivo>`.
-               - El cuerpo del comentario debe empezar SIEMPRE con la línea literal
+               - El cuerpo del comentario debe estar en formato **Markdown válido de GitHub**
+                 (encabezados con `##`/`###`, negritas con `**texto**`, checklists con `- [ ]`,
+                 código entre backticks) para que la interfaz de issues lo renderice
+                 correctamente y no como texto plano. Escribe el archivo tal cual, sin escapar
+                 los caracteres Markdown. El cuerpo debe empezar SIEMPRE con la línea literal
                  `<!-- claude-triage -->` y seguir exactamente esta plantilla en español (rellena
                  los `<...>`, no dejes placeholders sin completar, y usa "Ninguna" si no hay
                  preguntas abiertas):
