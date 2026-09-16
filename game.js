@@ -40,8 +40,12 @@ const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
+const themeToggle = document.getElementById('theme-toggle');
 
-let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, elapsedTime;
+const GRID_COLOR = { dark: '#22222e', light: '#d0d0dd' };
+const HIGHLIGHT_COLOR = { dark: 'rgba(255,255,255,0.12)', light: 'rgba(255,255,255,0.5)' };
+
+let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, elapsedTime, theme;
 
 function formatTime(ms) {
   const totalSeconds = Math.floor(ms / 1000);
@@ -171,13 +175,13 @@ function drawBlock(context, x, y, colorIndex, size, alpha) {
   context.fillStyle = color;
   context.fillRect(x * size + 1, y * size + 1, size - 2, size - 2);
   // highlight
-  context.fillStyle = 'rgba(255,255,255,0.12)';
+  context.fillStyle = HIGHLIGHT_COLOR[theme];
   context.fillRect(x * size + 1, y * size + 1, size - 2, 4);
   context.globalAlpha = 1;
 }
 
 function drawGrid() {
-  ctx.strokeStyle = '#22222e';
+  ctx.strokeStyle = GRID_COLOR[theme];
   ctx.lineWidth = 0.5;
   for (let c = 1; c < COLS; c++) {
     ctx.beginPath();
@@ -266,6 +270,13 @@ function loop(ts) {
   animId = requestAnimationFrame(loop);
 }
 
+function setTheme(newTheme) {
+  theme = newTheme;
+  document.body.classList.toggle('light', theme === 'light');
+  draw();
+  drawNext();
+}
+
 function init() {
   board = createBoard();
   score = 0;
@@ -277,6 +288,8 @@ function init() {
   dropAccum = 0;
   elapsedTime = 0;
   lastTime = performance.now();
+  theme = theme || 'dark';
+  document.body.classList.toggle('light', theme === 'light');
   next = randomPiece();
   spawn();
   updateHUD();
@@ -312,5 +325,9 @@ document.addEventListener('keydown', e => {
 });
 
 restartBtn.addEventListener('click', init);
+
+themeToggle.addEventListener('change', () => {
+  setTheme(themeToggle.checked ? 'light' : 'dark');
+});
 
 init();
